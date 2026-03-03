@@ -7,8 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-
-	"golang.org/x/sys/unix"
+	"syscall"
 )
 
 func main() {
@@ -17,7 +16,7 @@ func main() {
 		log.Fatal("Error: No input file")
 	}
 	for _, arg := range args {
-		mount, err := getFsMountPoint(arg)
+		mount, err := GetMountPoint(arg)
 		if err != nil {
 			log.Printf("%s: %v\n", arg, err)
 			continue
@@ -26,50 +25,35 @@ func main() {
 	}
 }
 
-func getFsMountPoint(file string) (string, error) {
-	path, err := fileCheck(file)
+func GetMountPoint(path string) (string, error) {
+	absPath, err := fileCheck(path)
 	if err != nil {
 		return "", err
 	}
-	// Statfs gets the filesystem type magic number
-	var stat unix.Statfs_t
-	err = unix.Statfs(path, &stat)
-	if err != nil {
-		return "", fmt.Errorf("Error: %v\n", err)
+	// Get device ID for the current path
+	var stat syscall.Stat_t
+	if err := syscall.Stat(absPath, &stat); err != nil {
+		return "", err
 	}
-	mountPoint := findMountPoint(path)
-	// fmt.Printf("File:        %s\n", path)
-	// fmt.Printf("FS Type Hex: 0x%x\n", stat.Type)
-	// fmt.Printf("Mount Point: %s\n", mountPoint)
-	return mountPoint, nil
-}
-
-// findMountPoint identifies the root of a filesystem by traversing up
-// the directory tree until the Device ID (stat.Dev) changes. In Unix,
-// a change in Device ID signifies that we have crossed a mount
-// boundary.
-func findMountPoint(path string) string {
-	dev := getDev(path)
+	dev := stat.Dev
+	current := absPath
 	for {
-		parent := filepath.Dir(path)
-		// If the parent directory is on a different device,
-		// the current path is the mount point.
-		if getDev(parent) != dev {
-			return path
+		parent := filepath.Dir(current)
+		var pStat syscall.Stat_t
+		if err := syscall.Stat(parent, &pStat); err != nil {
+			return "", err
 		}
-		// Stop if we've reached the system root (e.g., "/")
-		if parent == path {
-			return path
+		// If the parent has a different Device ID, 'current' is the
+		// mount point
+		if pStat.Dev != dev {
+			return current, nil
 		}
-		path = parent
+		// Stop if we hit the root directory
+		if current == parent {
+			return current, nil
+		}
+		current = parent
 	}
-}
-
-func getDev(path string) uint64 {
-	var stat unix.Stat_t
-	unix.Stat(path, &stat)
-
-	return stat.Dev
 }
 
 // fileCheck checks the file existence, and return its absolute path
