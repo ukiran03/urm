@@ -101,6 +101,8 @@ my-cli-app/
 ├── go.mod
 └── README.md
 #+end_src
+** check this issue on gitlab
+https://gitlab.com/dittyroma/xdg-specs/-/compare/master...harden-trashdir?from_project_id=27390697
 * Workspace dir
 =~/prog/groundworks/usemetestdir/=
 

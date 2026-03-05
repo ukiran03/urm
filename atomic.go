@@ -2,8 +2,13 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"text/template"
+	"time"
 )
 
 type SystemTrash struct {
@@ -22,39 +27,104 @@ func NewSystemTrash(impl TrashImpl) *SystemTrash {
 //   - moves (renames) the target file to $trash/files
 //   - update the $trash/directorysizes
 func (syst *SystemTrash) AtomicTrashOperation(targetFile string) (err error) {
-	var infoFile, dstPath, srcPath string
+	var infoFilePath, dstPath string
 	var isInfoFileCreated, isTargetFileMoved bool
+
+	srcPath, err := filepath.Abs(targetFile)
+	if err != nil {
+		return err
+	}
 
 	defer func() {
 		if err != nil {
 			// Rollbacks
 			if isInfoFileCreated {
-				os.Remove(infoFile)
+				_ = os.Remove(infoFilePath)
 			}
 			if isTargetFileMoved {
-				os.Rename(dstPath, srcPath)
+				// TODO: Try to move it back. If this fails, we have a
+				// bigger OS issue.
+				_ = os.Rename(dstPath, srcPath)
 			}
 		}
 	}()
 
 	// Action-1: Create info file
+	infoFilePath, err = syst.makeInfoFile(targetFile)
+	if err != nil {
+		return fmt.Errorf("failed to create info file: %w", err)
+	}
+	isInfoFileCreated = true
+
 	// Action-2: Move target file to trash
+	dstPath = strings.TrimSuffix(
+		filepath.Base(infoFilePath), filepath.Ext(infoFilePath),
+	)
+	err = syst.moveTargetToTrash(srcPath, dstPath)
+	if err != nil {
+		return fmt.Errorf("failed to move file to trash: %w", err)
+	}
+	isTargetFileMoved = true
+
 	return nil
 }
+
+// Parse once at startup for performance
+var infoTempl = template.Must(template.New("info").Parse(
+	`"[Trash Info]
+Path={{ .Path }}
+DeletionDate={{ .Time }}"
+`),
+)
 
 func (syst *SystemTrash) makeInfoFile(absFilePath string) (string, error) {
 	trashdir := syst.trash.SourceDir()
-	filename := filepath.Base(absFilePath)
-	uniqName := syst.getUniqTrashName(trashdir, filename)
-	infoPath := filepath.Join(trashdir, "info", uniqName+".trashinfo")
-	if err := syst.writeInfoFile(infoPath); err != nil {
+	absPath, err := filepath.Abs(absFilePath) // NOTE: Just in case
+	if err != nil {
 		return "", err
 	}
-	// [04-03-2026] TODO: Start here
-	return nil
+
+	uniqName := syst.getUniqTrashName(trashdir, filepath.Base(absPath))
+	infoPath := filepath.Join(trashdir, "info", uniqName+".trashinfo")
+
+	// Use os.OpenFile with specific permissions (0600 is best practice for trash)
+	f, err := os.OpenFile(infoPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	// Specification uses YYYY-MM-DDThh:mm:ss
+	dDate := time.Now().Format("2006-01-02T15:04:05")
+
+	if err := syst.writeInfo(f, absPath, dDate); err != nil {
+		return "", err
+	}
+	return infoPath, nil
 }
 
-func (syst *SystemTrash) writeInfoFile(infopath string) error {
+func (syst *SystemTrash) writeInfo(w io.Writer, origPath, dDate string) error {
+	encodedPath := url.PathEscape(origPath) // closest to RFC2396
+	data := struct {
+		Path string
+		Time string
+	}{
+		Path: encodedPath,
+		Time: dDate,
+	}
+	return infoTempl.Execute(w, data)
+}
+
+// [05-03-2026] TODO: this should be a method for each individual trash
+// implementation
+func (syst *SystemTrash) moveTargetToTrash(absFilePath, newFilename string) error {
+	trashdir := syst.trash.SourceDir()
+	absPath, err := filepath.Abs(absFilePath) // NOTE: Just in case
+	if err != nil {
+		return err
+	}
+	newPathOfTarget := filepath.Join(trashdir, "files", newFilename)
+	return os.Rename(absPath, newPathOfTarget)
 }
 
 func (syst *SystemTrash) getUniqTrashName(trashdir, filename string) string {
@@ -65,7 +135,7 @@ func (syst *SystemTrash) getUniqTrashName(trashdir, filename string) string {
 	}
 	// If exists, start incrementing
 	for i := 2; ; i++ {
-		newName := fmt.Sprintf("%s_%d", filename, i) // file.txt_2
+		newName := fmt.Sprintf("%s_%d", filename, i) // ex: file.txt_2
 		if _, err := os.Stat(newName); os.IsNotExist(err) {
 			return newName
 		}
