@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 )
 
 func main() {
@@ -19,4 +20,16 @@ func main() {
 		}
 		fmt.Printf("%s: %s\n", arg, mount)
 	}
+}
+
+// fileExists return it's Absolute path if the file exists, err otherwise
+func fileExists(filename string) (string, error) {
+	if _, err := os.Stat(filename); err != nil {
+		return "", err
+	}
+	absPath, err := filepath.Abs(filename)
+	if err != nil {
+		return "", fmt.Errorf("Could not determine absolute path: %w", err)
+	}
+	return absPath, nil
 }
