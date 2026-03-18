@@ -1,7 +1,6 @@
 package trash
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -19,48 +18,33 @@ var (
 	userHomeDir, _ = os.UserHomeDir()
 )
 
-func getMountsInfos() ([]*fs.MountInfo, error) {
-	f, err := os.Open(mountinfoFile)
-	if err != nil {
-		return nil, fmt.Errorf("Error opening mountinfo file: %w", err)
-	}
-	mounts, err := fs.ParseMountInfo(f, fs.IgnoreFsFunc)
-	if err != nil {
-		return nil, fmt.Errorf("Error parsing mountinfo file: %w", err)
-	}
-	return mounts, nil
-}
-
-func NewTrashManager(mounts []*fs.MountInfo, homeDir string) (*TrashManager, error) {
+func NewTrashManager(mounts []*fs.MountInfo, homeDir string) *TrashManager {
 	tm := &TrashManager{
 		Mounts: make(map[string]*TrashCan, len(mounts)),
 	}
 	for _, m := range mounts {
 		tm.Mounts[m.MountPoint] = NewTrashCan(m)
 	}
-
 	dataHome := os.Getenv("XDG_DATA_HOME")
 	if dataHome == "" {
 		dataHome = filepath.Join(homeDir, ".local", "share")
 	}
-	// HomeTrash is a special case; it's not a partition root,
-	// it's a specific folder.
+
 	tm.HomeTrash = &TrashCan{
 		RootPath: dataHome,
 	}
-	return tm, nil
+	return tm
 }
 
 // FindTarget decides which TrashCan should be used.
+// Get device ID of filePath If same as Home, return tm.HomeTrash
+// Else, look for a TrashCan on that mount point
 func (tm *TrashManager) FindTarget(filent *FileEntry) (*TrashCan, error) {
-	// Get device ID of filePath
-	// If same as Home, return tm.HomeTrash
-	// Else, lookfor a TrashCan on that mount point
-
 	if filent.DeviceID == tm.HomeTrash.DeviceID {
 		return tm.HomeTrash, nil
 	} else {
-		if trash, ok := tm.Mounts[filent.MountRoot]; ok {
+		if trash, ok := tm.Mounts[filent.MountRoot]; ok &&
+			onSameDevice(filent.DeviceID, trash.DeviceID) { // Is this neccessary?
 			return trash, nil
 		}
 	}
@@ -78,21 +62,16 @@ const (
 func (tm *TrashManager) Put(filent *FileEntry, strategy MoveStrategy) error {
 	targetCan, err := tm.FindTarget(filent)
 	if err != nil {
-		return err
+		switch strategy {
+		case MoveFallback:
+			// Prompt to user and operate
+			return tm.CopyAndDelete(filent)
+		}
 	}
-
-	if onSameDevice(filent.MountRoot, targetCan) {
-		// return targetCan.Put(filePath) // TODO:
-	}
-
-	switch strategy {
-	case MoveFallback:
-		// return tm.CopyAndDelete(filePath, tm.HomeTrash) // TODO:
-	default:
-		return errors.New("cross-device link: use Fallback strategy")
-	}
-	return nil
+	return targetCan.Move(filent)
 }
 
-// func onSameDevice(dstDevId, srcDevId uint64) bool
-func onSameDevice(fpath string, trash *TrashCan) bool
+func (tm *TrashManager) CopyAndDelete(filent *FileEntry) error {
+	// TODO: Copy to HomeTrash and delete the source file (filent)
+	panic("unimplemented")
+}

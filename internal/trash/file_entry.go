@@ -49,7 +49,7 @@ func NewFileEntry(filePath string) (*FileEntry, error) {
 	return entry, nil
 }
 
-// SetTrashPath is your "second pass" function.
+// SetTrashPath is the "second pass" function.
 func (f *FileEntry) SetTrashPath(destination string) {
 	f.TrashPath = destination
 }
