@@ -5,17 +5,17 @@ import (
 	"os"
 
 	"golang.org/x/sys/unix"
-	"ukiran.com/useme/internal/fs"
+	"ukiran.com/useme/internal/fsys"
 )
 
 // getMountsInfos: reads and parses mountinfoFile and produces slice
 // of available trash paths(ie $topdirs)
-func getMountsInfos(mountinfofile string) ([]*fs.MountInfo, error) {
+func getMountsInfos(mountinfofile string) ([]*fsys.MountInfo, error) {
 	f, err := os.Open(mountinfofile)
 	if err != nil {
 		return nil, fmt.Errorf("Error opening mountinfo file: %w", err)
 	}
-	mounts, err := fs.ParseMountInfo(f, fs.IgnoreFsFunc)
+	mounts, err := fsys.ParseMountInfo(f, fsys.IgnoreFsFunc)
 	if err != nil {
 		return nil, fmt.Errorf("Error parsing mountinfo file: %w", err)
 	}

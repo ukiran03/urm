@@ -5,7 +5,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"ukiran.com/useme/internal/fs"
+	"ukiran.com/useme/internal/fsys"
 )
 
 type TrashManager struct {
@@ -18,7 +18,7 @@ var (
 	userHomeDir, _ = os.UserHomeDir()
 )
 
-func NewTrashManager(mounts []*fs.MountInfo, homeDir string) *TrashManager {
+func NewTrashManager(mounts []*fsys.MountInfo, homeDir string) *TrashManager {
 	tm := &TrashManager{
 		Mounts: make(map[string]*TrashCan, len(mounts)),
 	}

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"ukiran.com/useme/internal/fs"
+	"ukiran.com/useme/internal/fsys"
 )
 
 // getHomeTrashDirectory: returns the HomeTrash of user with setup,
@@ -27,9 +27,9 @@ func getHomeTrashDirectory(rootPath string) (string, error) {
 	}
 
 	// Otherwise, initialise the Trash Dir
-	homeTrash, err = fs.InitTrashCan(trashPath) // NOTE: Assuming no errors
+	homeTrash, err = fsys.InitTrashCan(trashPath) // NOTE: Assuming no errors
 	if err != nil {
-		return "", fmt.Errorf("Error fs.InitTrashCan in HomeDir: %w", err)
+		return "", fmt.Errorf("Error fsys.InitTrashCan in HomeDir: %w", err)
 	}
 	return homeTrash, nil
 }
@@ -60,9 +60,9 @@ func getSpecialTrashDirectory(rootPath string) (string, error) {
 			fmt.Errorf("failed to create trash directory %s: %w", uidTrashDir, err)
 	}
 
-	specialTrash, err = fs.InitTrashCan(uidTrashDir)
+	specialTrash, err = fsys.InitTrashCan(uidTrashDir)
 	if err != nil {
-		return "", fmt.Errorf("Error fs.InitTrashCan: %w", err)
+		return "", fmt.Errorf("Error fsys.InitTrashCan: %w", err)
 	}
 	return specialTrash, nil
 }
