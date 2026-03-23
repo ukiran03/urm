@@ -1,0 +1,15 @@
+$ sudo touch /tmp/file.txt
+
+$ rm /tmp/file.txt
+
+trash-put: cannot trash regular empty file '/tmp/file.txt' (from volume '/tmp')
+
+trash-put: `- failed to trash /tmp/file.txt in /home/ukiran/.local/share/Trash, because trash
+dir and file to be trashed are not in the same volume, trash-dir volume: /home, file
+volume: /tmp
+
+trash-put: `- failed to trash /tmp/file.txt in /tmp/.Trash/1000, because trash dir cannot be
+created because its parent does not exists, trash-dir: /tmp/.Trash/1000, parent: /tmp/.Trash
+
+trash-put: `- failed to trash /tmp/file.txt in /tmp/.Trash-1000, because failed to move
+/tmp/file.txt in /tmp/.Trash-1000/files: [Errno 1] Operation not permitted: '/tmp/file.txt'
