@@ -3,6 +3,7 @@ package trash
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"golang.org/x/sys/unix"
 	"ukiran.com/useme/internal/fsys"
@@ -31,18 +32,31 @@ func onSameDevice(dstDevId, srcDevId uint64) bool {
 	return false
 }
 
-func dirExists(path string) (os.FileInfo, bool, error) {
-	info, err := os.Lstat(path)
+func DirExists(path string) (isDir, isSymlink bool, info os.FileInfo, err error) {
+	info, err = os.Lstat(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// Path explicitly does not exist
-			return nil, false, nil
+			return false, false, nil, nil
 		}
 		// Some other error (Permissions, etc.)
-		return nil, false, err
+		return false, false, nil, err
 	}
-	// No error, so the path exists. Now check if it's a directory.
-	return info, info.IsDir(), nil
+	mode := info.Mode()
+	isSymlink = (mode & os.ModeSymlink) != 0
+	// info.IsDir() is only true if it's a real directory, NOT a
+	// symlink to one.
+	return info.IsDir(), isSymlink, info, nil
+}
+
+func FileCheck(inputPath string) (string, os.FileInfo, error) {
+	cleanPath := filepath.Clean(inputPath)
+	// Get metadata without following symlinks
+	info, err := os.Lstat(cleanPath)
+	if err != nil {
+		return cleanPath, nil, err
+	}
+	return cleanPath, info, nil
 }
 
 // Ensure PATH is secure (Sticky Bit).
