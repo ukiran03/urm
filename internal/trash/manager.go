@@ -36,15 +36,16 @@ func NewTrashManager(mounts []*fsys.MountInfo, homeDir string) *TrashManager {
 	return tm
 }
 
-// FindTarget decides which TrashCan should be used.
-// Get device ID of filePath If same as Home, return tm.HomeTrash
-// Else, look for a TrashCan on that mount point
+// FindTarget decides which TrashCan should be used. Get device ID of
+// FileEntry, If same as Home, return tm.HomeTrash Else, look for a
+// TrashCan on that mount point
 func (tm *TrashManager) FindTarget(filent *FileEntry) (*TrashCan, error) {
-	if filent.DeviceID == tm.HomeTrash.DeviceID {
+	devID := filent.Stat.Dev
+	if devID == tm.HomeTrash.DeviceID {
 		return tm.HomeTrash, nil
 	} else {
 		if trash, ok := tm.Mounts[filent.MountRoot]; ok &&
-			onSameDevice(filent.DeviceID, trash.DeviceID) { // Is this neccessary?
+			onSameDevice(devID, trash.DeviceID) { // Is this neccessary?
 			return trash, nil
 		}
 	}
