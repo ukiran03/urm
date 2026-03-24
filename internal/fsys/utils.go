@@ -3,8 +3,12 @@ package fsys
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync"
+	"sync/atomic"
 )
 
 // InitTrashCan: Initialises the TrashDir, with all its requirments
@@ -50,4 +54,63 @@ func MakeDirCacheFile(cachepath string) error {
 		return fmt.Errorf("could not create cache file %s: %w", cachepath, err)
 	}
 	return f.Close()
+}
+
+func ConcurrnetDirSize(path string) (int64, error) {
+	var total atomic.Int64
+	var wg sync.WaitGroup
+	sema := make(chan struct{}, 2*runtime.NumCPU())
+
+	var walker func(string)
+	walker = func(p string) {
+		sema <- struct{}{}
+		entries, err := os.ReadDir(p)
+		<-sema
+
+		if err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				// NOTE: Are we really skipping
+				fmt.Fprintf(os.Stderr, "Permission denied, skipping [%v]\n", p)
+			} else {
+				fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", p, err)
+			}
+			return
+		}
+
+		for _, entry := range entries {
+			if entry.IsDir() {
+				wg.Go(func() {
+					walker(filepath.Join(p, entry.Name()))
+				})
+			} else {
+				info, err := entry.Info()
+				if err == nil {
+					total.Add(info.Size())
+				}
+			}
+		}
+	}
+
+	wg.Go(func() {
+		walker(path)
+	})
+	wg.Wait()
+	return total.Load(), nil
+}
+
+func FileExists(filename string) (string, bool, error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		switch {
+		case os.IsNotExist(err):
+			return "", false, fmt.Errorf("file %s does not exist", filename)
+		case os.IsPermission(err):
+			return "", false,
+				fmt.Errorf("you don't have persmission to access %s", filename)
+		default:
+			return "", false, err
+		}
+	}
+	defer f.Close()
+	return f.Name(), true, nil
 }
