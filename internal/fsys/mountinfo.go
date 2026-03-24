@@ -103,6 +103,8 @@ var (
 		"efivarfs":    true,
 		"hugetlbfs":   true,
 		"mqueue":      true,
+		"overlay":     true, // Docker container layers
+		"nsfs":        true, // Docker network namespaces (netns)
 		// Network Drives
 		"nfs":  true,
 		"nfs4": true,
