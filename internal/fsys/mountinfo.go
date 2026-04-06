@@ -9,32 +9,28 @@ import (
 	"strings"
 )
 
-// "36 35 98:0 / /mnt/data rw,relatime shared:1 - ext4 /dev/sda1 rw,seclabel"
-
 type MountInfo struct {
-	MountID      int
-	ParentID     int
-	Major, Minor int
-	Root         string
-	MountPoint   string
-	Opts         string
-	OptFields    string
-	FSType       string
-	Source       string
-	SuperOpts    string
+	MountID    int    // To uniquely identify the mount
+	ParentID   int    // Useful if you need to trace up to the root
+	Major      int    // Device Major
+	Minor      int    // Device Minor
+	MountPoint string // e.g., /mnt/data
+	Opts       string // e.g., rw,relatime
+	FSType     string // e.g., ext4 (to skip network mounts like nfs/smb)
+	Source     string // e.g., /dev/sda1
 }
 
 func (m *MountInfo) String() string {
 	return fmt.Sprintf(
-		"%d %d %d:%d %s %s %s %s - %s %s %s",
+		"%d %d %d:%d %s %s - %s %s",
 		m.MountID, m.ParentID, m.Major, m.Minor,
-		m.Root, m.MountPoint, m.Opts,
-		m.OptFields, m.FSType, m.Source, m.SuperOpts,
+		m.MountPoint, m.Opts, m.FSType, m.Source,
 	)
 }
 
 type FilterFunc func(*MountInfo) (ignore bool)
 
+// "36 35 98:0 / /mnt/data rw,relatime shared:1 - ext4 /dev/sda1 rw,seclabel"
 func ParseMountInfo(r io.Reader, filterFunc FilterFunc) ([]*MountInfo, error) {
 	mountinfos := make([]*MountInfo, 0, 20)
 	scanner := bufio.NewScanner(r)
@@ -61,15 +57,11 @@ func ParseMountInfo(r io.Reader, filterFunc FilterFunc) ([]*MountInfo, error) {
 			ParentID:   toInt(fields[1]),
 			Major:      toInt(major),
 			Minor:      toInt(minor),
-			Root:       unescape(fields[3]),
 			MountPoint: unescape(fields[4]),
 			Opts:       fields[5],
-			OptFields:  strings.Join(fields[6:sepIdx], " "),
 			FSType:     unescape(fields[sepIdx+1]),
 			Source:     unescape(fields[sepIdx+2]),
-			SuperOpts:  fields[sepIdx+3],
 		}
-
 		if filterFunc != nil {
 			if ignorable := filterFunc(info); ignorable {
 				continue
@@ -84,43 +76,87 @@ func ParseMountInfo(r io.Reader, filterFunc FilterFunc) ([]*MountInfo, error) {
 }
 
 var (
-	tmpFS         = "tmpfs"
 	ignoreFsTypes = map[string]bool{
-		"home":        true, // HomeTrash is a special case
-		"proc":        true,
-		"sysfs":       true,
-		"devtmpfs":    true,
-		"configfs":    true,
-		"debugfs":     true,
-		"tracefs":     true,
-		"binfmt_misc": true,
-		"fusectl":     true,
-		"pstore":      true,
-		"devpts":      true,
-		"autofs":      true,
-		"cgroup":      true,
-		"cgroup2":     true,
-		"efivarfs":    true,
-		"hugetlbfs":   true,
-		"mqueue":      true,
-		"overlay":     true, // Docker container layers
-		"nsfs":        true, // Docker network namespaces (netns)
-		// Network Drives
-		"nfs":  true,
-		"nfs4": true,
-		"cifs": true,
-		"smb3": true,
+		// Kernel & System Virtual Filesystems
+		"proc":        true, // Process information pseudo-filesystem
+		"sysfs":       true, // Kernel objects/subsystems interface
+		"devtmpfs":    true, // Device node management
+		"configfs":    true, // Userspace-driven kernel object configuration
+		"debugfs":     true, // Kernel debugging interface
+		"tracefs":     true, // Infrastructure for kernel tracing
+		"binfmt_misc": true, // Support for non-native binary formats
+		"fusectl":     true, // Control interface for FUSE filesystems
+		"pstore":      true, // Persistent storage for kernel oops/logs
+		"devpts":      true, // Pseudo-terminal slave devices
+		"autofs":      true, // Kernel-based automounter support
+		"cgroup":      true, // Control Groups v1
+		"cgroup2":     true, // Control Groups v2
+		"efivarfs":    true, // Interface to EFI variable storage
+		"hugetlbfs":   true, // Huge page memory support
+		"mqueue":      true, // POSIX message queues
+		"nsfs":        true, // Namespace filesystems
+		"rpc_pipefs":  true, // RPC pipe communication for NFS/SunRPC
+		"squashfs":    true, // Compressed read-only FS (often used for Snaps)
+
+		// Container & Overlay Filesystems
+		"overlay": true, // Docker/Container layered filesystems
+
+		// Network Filesystems
+		"nfs":        true, // Network File System (general)
+		"nfs4":       true, // Network File System v4
+		"cifs":       true, // Common Internet File System (Samba)
+		"smb3":       true, // Server Message Block v3
+		"davfs":      true, // WebDAV (Remote web folders)
+		"fuse.sshfs": true, // Filesystem over SSH
+
+		// Virtual Desktop / FUSE Portals
+		"fuse.gvfsd-fuse": true, // GNOME Virtual File System
+		"fuse.portal":     true, // Flatpak/Snap document portals
+	}
+
+	ignorePrefixes = []string{
+		// System Critical Roots
+		"/dev",  // Static and dynamic device nodes
+		"/proc", // Process and kernel information
+		"/sys",  // System hardware and driver information
+		"/boot", // Bootloader, kernels, and initrd
+
+		// User Data & Special Exclusions
+		"/home",             // The /home mount point itself (prevents .Trash here)
+		"/home/docker-data", // Personal exclusion for docker volume data
+
+		// Service & Container Data
+		"/var/lib/docker", // Internal Docker storage/images
+		"/var/run",        // Modern Linux runtime state (symlink to /run)
+		"/run/lock",       // Coordinated device/file locking
+		"/run/initramfs",  // Root FS used during early boot
+
+		// Specific User Runtime Portals
+		"/run/user/1000/doc",  // Virtual document portals (FUSE)
+		"/run/user/1000/gvfs", // Virtual filesystem mounts (FUSE)
 	}
 )
 
-// HomeTrash is a special case; it's not a partition root, it's a
-// specific folder.
 func IgnoreFsFunc(minfo *MountInfo) bool {
 	if ignoreFsTypes[minfo.FSType] {
 		return true
 	}
-	// Field 6: Mount Options. If 'ro' is present, we can't write a Trash
-	// folder.
+	// We want /tmp, but we don't want '/dev/shm' or '/run/user/1000'
+	if minfo.FSType == "tmpfs" && minfo.MountPoint != "/tmp" {
+		// If it's a RAM disk but NOT the standard /tmp, ignore it.
+		// Note: Check your run/media paths; if your Kindle is tmpfs (rare),
+		// you might need to adjust this.
+		if !strings.HasPrefix(minfo.MountPoint, "/run/media") {
+			return true
+		}
+	}
+	// Check the Prefixes
+	for _, prefix := range ignorePrefixes {
+		if strings.HasPrefix(minfo.MountPoint, prefix) {
+			return true
+		}
+	}
+	// Check Read-Only
 	if slices.Contains(strings.Split(minfo.Opts, ","), "ro") {
 		return true
 	}
