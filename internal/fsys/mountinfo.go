@@ -7,13 +7,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"golang.org/x/sys/unix"
 )
 
 type MountInfo struct {
 	MountID    int    // To uniquely identify the mount
 	ParentID   int    // Useful if you need to trace up to the root
-	Major      int    // Device Major
-	Minor      int    // Device Minor
+	DevID      uint64 // Device ID
 	MountPoint string // e.g., /mnt/data
 	Opts       string // e.g., rw,relatime
 	FSType     string // e.g., ext4 (to skip network mounts like nfs/smb)
@@ -22,8 +23,8 @@ type MountInfo struct {
 
 func (m *MountInfo) String() string {
 	return fmt.Sprintf(
-		"%d %d %d:%d %s %s - %s %s",
-		m.MountID, m.ParentID, m.Major, m.Minor,
+		"%d %d %d %s %s - %s %s",
+		m.MountID, m.ParentID, m.DevID,
 		m.MountPoint, m.Opts, m.FSType, m.Source,
 	)
 }
@@ -55,8 +56,7 @@ func ParseMountInfo(r io.Reader, filterFunc FilterFunc) ([]*MountInfo, error) {
 		info := &MountInfo{
 			MountID:    toInt(fields[0]),
 			ParentID:   toInt(fields[1]),
-			Major:      toInt(major),
-			Minor:      toInt(minor),
+			DevID:      deviceID(toInt(major),toInt(minor))
 			MountPoint: unescape(fields[4]),
 			Opts:       fields[5],
 			FSType:     unescape(fields[sepIdx+1]),
@@ -122,7 +122,7 @@ var (
 		"/boot", // Bootloader, kernels, and initrd
 
 		// User Data & Special Exclusions
-		"/home",             // The /home mount point itself (prevents .Trash here)
+		// "/home",             // The /home mount point itself (prevents .Trash here)
 		"/home/docker-data", // Personal exclusion for docker volume data
 
 		// Service & Container Data
@@ -168,4 +168,8 @@ func IgnoreFsFunc(minfo *MountInfo) bool {
 func toInt(s string) int {
 	i, _ := strconv.Atoi(s)
 	return i
+}
+
+func deviceID(major, minor int) uint64 {
+	return unix.Mkdev(uint32(major), uint32(minor))
 }
