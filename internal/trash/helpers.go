@@ -61,7 +61,7 @@ func FileCheck(inputPath string) (string, os.FileInfo, error) {
 
 // Ensure PATH is secure (Sticky Bit).
 // os.ModeSticky is 0x20000000; in chmod terms, it's the "1" in "1777"
-func haveSticyBit(path string, info os.FileInfo) (bool, error) {
+func haveSticyBit(info os.FileInfo, path string) (bool, error) {
 	if (info.Mode() & os.ModeSticky) == 0 {
 		return false, fmt.Errorf(
 			// other users could delete files
@@ -72,7 +72,7 @@ func haveSticyBit(path string, info os.FileInfo) (bool, error) {
 }
 
 // Check ownership (Standard requirement: must be owned by root and global-writable)
-func havePermissions(path string, info os.FileInfo) (bool, error) {
+func havePermissions(info os.FileInfo, path string) (bool, error) {
 	stat, ok := info.Sys().(*unix.Stat_t)
 	if !ok {
 		return false, fmt.Errorf(

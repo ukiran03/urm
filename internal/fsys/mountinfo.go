@@ -138,8 +138,8 @@ var (
 		"/run/initramfs",  // Root FS used during early boot
 
 		// Specific User Runtime Portals
-		fmt.Sprintf("/run/user/%s/doc", env.UID),  // Virtual document portals (FUSE)
-		fmt.Sprintf("/run/user/%s/gvfs", env.UID), // Virtual filesystem mounts (FUSE)
+		fmt.Sprintf("/run/user/%d/doc", env.UID),  // Virtual document portals (FUSE)
+		fmt.Sprintf("/run/user/%d/gvfs", env.UID), // Virtual filesystem mounts (FUSE)
 	}
 )
 
