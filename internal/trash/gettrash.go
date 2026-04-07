@@ -5,102 +5,48 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-
-	"ukiran.com/useme/internal/fsys"
 )
 
-// getHomeTrashDirectory: returns the HomeTrash of user with setup,
-// also creates if absent.
-func getHomeTrashDirectory(rootPath string) (string, error) {
-	// HomeTrash dir for the user
-	var homeTrash string
+type InitAction int
 
-	trashPath := filepath.Join(rootPath, "Trash")
+const (
+	DoInit InitAction = iota
+	NoInit            // Dry run
+)
 
-	_, exists, err := dirExists(trashPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to check home trash existence: %w", err)
-	}
-
-	if exists { // If Trash Dir exists, return it
-		return trashPath, nil
-	}
-
-	// Otherwise, initialise the Trash Dir
-	homeTrash, err = fsys.InitTrashCan(trashPath) // NOTE: Assuming no errors
-	if err != nil {
-		return "", fmt.Errorf("Error fsys.InitTrashCan in HomeDir: %w", err)
-	}
-	return homeTrash, nil
+// getHomeTrashPath: returns the valid TrashPath from the current
+// user's HomeDir return error otherwise.
+func getHomeTrashPath(homePath string) (string, error) {
+	homeTrash := filepath.Join(homePath, ".local", "share", "Trash")
+	return ensureTrashDir(homeTrash)
 }
 
-// getSpecialTrashDirectory: returns the SpecialTrash for the device
-// with setup, also creates if absent.
-func getSpecialTrashDirectory(rootPath string) (string, error) {
-	// SpecialTrash dir for the user ($uid)
-	var specialTrash string
+// getSpecialTrashPath: returns the valid TrashPath for the given
+// Mountpoint, either M01 or M02 (creates if needed), return error
+// otherwise.
+func getSpecialTrashPath(rootPath string, uid int) (string, error) {
+	// Method (1): Admin created M01Trash: $topdir/.Trash/$uid
+	M01Trash := filepath.Join(rootPath, ".Trash", strconv.Itoa(uid))
+	exists, isSymlink, info, err := DirExists(M01Trash)
 
-	var uidTrashDir string
-
-	// Check for .Trash (Admin created Trash)
-	adminTrashDir := filepath.Join(rootPath, ".Trash")
-
-	uidTrashDir, err := getAdminTrashDir(adminTrashDir)
-	if err == nil && uidTrashDir != "" {
-		return uidTrashDir, nil
+	// NOTE: MAY also report the user
+	if exists && !isSymlink && err == nil {
+		sticky, _ := haveSticyBit(info, M01Trash)
+		permissioned, _ := havePermissions(info, M01Trash)
+		if sticky && permissioned {
+			return M01Trash, nil
+		}
 	}
 
-	// Create .Trash-1000 ($uid)
-	uid := os.Getuid()
-	uidTrashDir = filepath.Join(rootPath, fmt.Sprintf(".Trash-%d", uid))
-
-	// If we can't create the directory, we can't use it.
-	if err := os.MkdirAll(uidTrashDir, 0o700); err != nil {
-		return "",
-			fmt.Errorf("failed to create trash directory %s: %w", uidTrashDir, err)
-	}
-
-	specialTrash, err = fsys.InitTrashCan(uidTrashDir)
-	if err != nil {
-		return "", fmt.Errorf("Error fsys.InitTrashCan: %w", err)
-	}
-	return specialTrash, nil
+	// Method (2): Per-User trash M02Trash: $topdir/.Trash-$uid
+	M02Trash := filepath.Join(rootPath, fmt.Sprintf(".Trash-%d", uid))
+	return ensureTrashDir(M02Trash)
 }
 
-// getAdminTrashDir: checks for a valid ".Trash" dir, which is often
-// created by the admin, also should have a sticky-bit and valid
-// permissions for the user. Then either return the created/existing
-// .Trash/$uid dir, error otherwise.
-func getAdminTrashDir(path string) (string, error) {
-	info, exists, err := dirExists(path)
-	if err != nil || !exists {
-		return "", err
+// Helper to handle the directory creation logic
+func ensureTrashDir(path string) (string, error) {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return "", &TrashError{Op: "mkdir", Path: path, Err: err}
 	}
-
-	var stickybit, permissioned bool
-	stickybit, err = haveSticyBit(path, info)
-	if err != nil || !stickybit {
-		return "", err
-	}
-	permissioned, err = havePermissions(path, info)
-	if err != nil || !permissioned {
-		return "", err
-	}
-
-	// create/retrieve the .Trash/$uid dir
-	uid := strconv.Itoa(os.Getuid())
-	uidDir := filepath.Join(path, uid)
-
-	err = os.MkdirAll(uidDir, 0o700)
-	if err != nil {
-		return "", fmt.Errorf("failed to create user trash directory: %w", err)
-	}
-	info, err = os.Stat(uidDir)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("path %s exists but is not a directory", uidDir)
-	}
-	return uidDir, nil
+	return path, nil
 }
