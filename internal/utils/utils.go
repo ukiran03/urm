@@ -1,4 +1,4 @@
-package fsys
+package utils
 
 import (
 	"errors"
@@ -12,7 +12,7 @@ import (
 )
 
 // InitTrashCan: Initialises the TrashDir, with all its requirments
-// (files & info directory, dircachefile file)
+// (files, info directories and dircachefile file)
 func InitTrashCan(trashPath string) (string, error) {
 	// Ensure the root trash path exists and has strict permissions
 	if err := os.MkdirAll(trashPath, 0o700); err != nil {
@@ -36,14 +36,15 @@ func InitTrashCan(trashPath string) (string, error) {
 			)
 		}
 	}
+
 	dirCacheFile := filepath.Join(trashPath, "directorysizes")
-	if err := MakeDirCacheFile(dirCacheFile); err != nil {
+	if err := makeDirCacheFile(dirCacheFile); err != nil {
 		return "", fmt.Errorf("Failed to create directorysizes file: %w", err)
 	}
 	return trashPath, nil
 }
 
-func MakeDirCacheFile(cachepath string) error {
+func makeDirCacheFile(cachepath string) error {
 	// O_CREATE | O_EXCL ensures we don't truncate or touch it if it
 	// already exists
 	f, err := os.OpenFile(cachepath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
@@ -56,31 +57,33 @@ func MakeDirCacheFile(cachepath string) error {
 	return f.Close()
 }
 
+// TODO: This is not correct/safe impl, needs refactoring
 func ConcurrnetDirSize(path string) (int64, error) {
 	var total atomic.Int64
 	var wg sync.WaitGroup
 	sema := make(chan struct{}, 2*runtime.NumCPU())
 
-	var walker func(string)
-	walker = func(p string) {
-		sema <- struct{}{}
-		entries, err := os.ReadDir(p)
-		<-sema
+	var walker func(string) error
+	walker = func(p string) error {
+		sema <- struct{}{}        // acquire
+		defer func() { <-sema }() // defer release
 
+		entries, err := os.ReadDir(p)
 		if err != nil {
 			if errors.Is(err, fs.ErrPermission) {
-				// NOTE: Are we really skipping
-				fmt.Fprintf(os.Stderr, "Permission denied, skipping [%v]\n", p)
-			} else {
-				fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", p, err)
+				fmt.Fprintf(os.Stderr, "Permission denied, skipping [%s]\n", p)
+				return nil // continue with siblings
 			}
-			return
+			fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", p, err)
+			return err
 		}
 
 		for _, entry := range entries {
+			fullpath := filepath.Join(p, entry.Name())
 			if entry.IsDir() {
 				wg.Go(func() {
-					walker(filepath.Join(p, entry.Name()))
+					// ignore error for now (or propagate via channel)
+					_ = walker(fullpath)
 				})
 			} else {
 				info, err := entry.Info()
@@ -89,6 +92,7 @@ func ConcurrnetDirSize(path string) (int64, error) {
 				}
 			}
 		}
+		return nil
 	}
 
 	wg.Go(func() {
